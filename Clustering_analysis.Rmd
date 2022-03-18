@@ -1,0 +1,705 @@
+---
+title: "10X_clk856_TH_20210928"
+author: "Dylan"
+date: "10/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# laod libs, setup
+```{r}
+library( tidyverse )
+library( gtools )
+library( magrittr )
+library( ggrepel )
+library( cowplot )
+library( patchwork )
+library( Seurat )
+library( ComplexHeatmap )
+library( circlize )
+library( viridis )
+
+setwd("~/Documents/GitHub/10X_Clk856_TH/")
+options(stringsAsFactors = FALSE)
+
+
+
+"%ni%" <- Negate("%in%")
+
+theme_set( theme_light() )
+
+source("~/Documents/GitHub/10X_Clk856_TH/R/main_functions.R",local = knitr::knit_global())
+
+set.seed(123)
+
+```
+
+# clean enviroment
+
+```{r}
+
+rm(list=ls()); gc()
+ls()
+
+```
+
+
+```{r}
+
+s.all.subset <- readRDS("~/Documents/GitHub/10X_Clk856_TH/data/subset_confident_clock_th_clusters_removed_bad_cells_renamed_clusters_2021-11-01.rds")
+
+s.all.subset$renamed_idents <- as.character(s.all.subset$renamed_idents )
+s.all.subset$renamed_idents[s.all.subset$renamed_idents == "2"] = "2:Clk"
+s.all.subset$renamed_idents[s.all.subset$renamed_idents == 25] <- "25:DN1p(4)"
+
+DimPlot(s.all.subset, label = T) + 
+  theme_minimal() +
+  NoLegend()
+
+dim( s.all.subset )
+
+```
+
+# save rds data
+
+```{r}
+
+saveRDS(s.all.subset,file = "~/Documents/GitHub/10X_Clk856_TH/data/subset_confident_clock_th_clusters_removed_bad_cells_renamed_clusters_2021-11-01.rds")
+
+```
+
+
+# read 10X data
+
+```{r}
+
+zt02.raw <- Read10X(data.dir = "~/Desktop/phoebe/10x_clk856_TH/ZT02_DM210930_A_A2/outs/filtered_feature_bc_matrix/")
+colnames( zt02.raw ) <- paste(colnames( zt02.raw ),"ZT02", sep = "_")
+
+zt02.raw %<>% as.matrix() %>% 
+  as.data.frame()
+zt02.raw <- zt02.raw[rowSums(zt02.raw ) > 0,]
+
+zt14.raw <- Read10X(data.dir = "~/Desktop/phoebe/10x_clk856_TH/ZT14_DM210930_B_A3//outs/filtered_feature_bc_matrix/")
+colnames( zt14.raw ) <- paste(colnames( zt14.raw ),"ZT14", sep = "_")
+
+zt14.raw %<>% as.matrix() %>% 
+  as.data.frame()
+zt14.raw <- zt14.raw[rowSums(zt14.raw ) > 0,]
+
+zt02.raw.seurat <- CreateSeuratObject(counts = zt02.raw, project = "ZT02", min.cells = 3, min.features = 200)
+
+zt02.raw.seurat@meta.data %<>% 
+  mutate( time = "ZT02",
+          barcode = "A2",
+          Repeat = "ten_x_1")
+
+zt14.raw.seurat <- CreateSeuratObject(counts = zt14.raw, project = "ZT14", min.cells = 3, min.features = 200)
+
+zt14.raw.seurat@meta.data %<>% 
+  mutate( time = "ZT14",
+          barcode = "A3",
+          Repeat = "ten_x_1")
+
+s.all <- merge(zt02.raw.seurat, zt14.raw.seurat)
+
+
+s.all[["percent.mt"]] <- PercentageFeatureSet(s.all, pattern = "^mt:")
+s.all@meta.data$cell.name <- rownames( s.all@meta.data )
+
+```
+
+# remove doublets from 10x data
+
+```{r}
+read.csv("scrublet_output_table_ZT02.csv") %>% 
+  mutate(color = ifelse(doublet_score > 0.15, "yes","no")) %>% 
+  # count(color) %>% 
+  ggplot( aes(doublet_score, fill = color)) +
+  geom_histogram()+
+  scale_x_log10()
+
+df.barcodes <- read.csv("data_old/10x_filtered_raw_data/ZT02/barcodes.tsv",header = FALSE)
+
+
+l.db.02 <- read.csv("scrublet_output_table_ZT02.csv") %>% 
+  mutate(barcodes = df.barcodes$V1) %>% 
+  filter( doublet_score > 0.15 ) %>% 
+  pull(barcodes)
+
+l.db.02 <- gsub("-1","_ZT02",l.db.02)
+
+
+df.barcodes <- read.csv("data_old/10x_filtered_raw_data/ZT14/barcodes.tsv",header = FALSE)
+
+
+l.db.14 <- read.csv("scrublet_output_table_ZT14.csv") %>% 
+  mutate(barcodes = df.barcodes$V1) %>% 
+  filter( doublet_score > 0.15 ) %>% 
+  pull(barcodes)
+
+l.db.14 <- gsub("-1","_ZT14",l.db.14)
+
+
+l.dbs <- c(l.db.02, l.db.14)
+
+s.all <- subset(s.all, cells = s.all$cell.name[s.all$cell.name %ni% l.dbs])
+
+```
+
+
+# Calculate entropy of each single cells
+
+```{r}
+
+s.all@meta.data$entropy <- f.entropy( s.all$RNA@counts )
+
+```
+
+```{r}
+
+# based on the QC results above, filter the cells
+
+s.all <- subset( s.all, cells = s.all@meta.data$cell.name[
+                                   s.all@meta.data$nCount_RNA   > 1000  &
+                                   s.all@meta.data$nCount_RNA   < 25000 &
+                                   s.all@meta.data$nFeature_RNA > 300 &
+                                   s.all@meta.data$nFeature_RNA < 3500 &
+                                   s.all@meta.data$entropy      > 5.0 &
+                                   s.all@meta.data$percent.mt < 10
+                                   ] );
+
+s.all@meta.data$experiment <- "ten_x"
+
+cat("There are ",ncol(s.all),"cells left")
+
+```
+
+
+# read clock neuron and TH neuron Celseq2 data
+
+```{r}
+
+s.clk <- readRDS("~/Desktop/clk856_figures/raw_rds/dm_clock_neurons_39_raw_clustering.rds")
+
+s.clk <- subset(s.clk, cells = s.clk@meta.data$cell.names[s.clk@meta.data$experiment == "CLK856_LD"])
+
+s.clk@meta.data %<>%
+  rename("percent.mt" = "percent.mito",
+         "Repeat" = "Repeats") %>% 
+  mutate( method = "Celseq2",
+          Source = "Clk856")
+
+
+
+# prepare TH data ---
+# all  raw single cell data from Celseq2 were put together in a seurat object, s.dat.in.th.new.ex.rds.
+# use f.entropy to calculate the gene expression entropy and no filtering was applied to this object
+
+s.th <- readRDS("~/Desktop/server/sc_TH/parsed_data_seurat/s.dat.in.th.new.ex.rds")
+
+s.th@meta.data$time <- gsub("ZT6","ZT06",s.th@meta.data$time,ignore.case = TRUE)
+
+s.th <- PercentageFeatureSet(s.th, pattern = "^mt:",assay = 'RNA',col.name = "percent.mt")
+
+s.th@meta.data %<>% 
+  mutate( Source = "TH",
+          method = "Celseq2",
+          Repeat = "TH_LD_1")
+
+celseq2.MIN.nCount.RNA   <-  4000;
+celseq2.MAX.nCount.RNA   <- 75000;
+celseq2.MIN.nFeature.RNA <- 500;
+celseq2.MAX.nFeature.RNA <- 6000;
+celseq2.MIN.ENTROPY     <- 5;
+
+s.th <- subset( s.th, cells = s.th@meta.data$cell.name[
+  s.th@meta.data$nCount_RNA   > celseq2.MIN.nCount.RNA  &
+    s.th@meta.data$nCount_RNA   < celseq2.MAX.nCount.RNA &
+    s.th@meta.data$nFeature_RNA > celseq2.MIN.nFeature.RNA &
+    s.th@meta.data$nFeature_RNA < celseq2.MAX.nFeature.RNA &
+    s.th@meta.data$entropy      > celseq2.MIN.ENTROPY 
+] );
+
+s.clk@meta.data %<>% 
+  select( orig.ident, nCount_RNA, nFeature_RNA, barcode, time, experiment, cell.names, entropy, percent.mt, Source, method, Repeat, Idents)
+
+s.th@meta.data %<>% 
+  select( orig.ident, nCount_RNA, nFeature_RNA, barcode, time, experiment, cell.names, entropy, percent.mt, Source, method, Repeat) %>% 
+  mutate( Idents = "TH")
+
+s.celseq2 <- merge(s.clk, s.th)
+
+
+s.all@meta.data <- s.all@meta.data %>% 
+  mutate( Source = "dual_gal4s",
+          method = "ten_x",
+          Idents = "ten_x") %>% 
+  rename("cell.names" = "cell.name")
+
+s.all <- PercentageFeatureSet(s.all, pattern = "^mt:",assay = 'RNA',col.name = "percent.mt")
+
+all( names(s.all@meta.data) %in% names( s.celseq2@meta.data ))
+
+s.all <- merge( s.all, s.celseq2)
+
+
+```
+
+# save RDS for clustering on server
+
+```{r}
+
+s.all <-  s.all %>% 
+  NormalizeData( normalization.method = "LogNormalize", scale.factor = 10000) %>% 
+  FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>% 
+  ScaleData( features = rownames(.)) %>% 
+  RunPCA(features = VariableFeatures(.)) %>% 
+  FindNeighbors( dims = 1:50) %>% 
+  FindClusters(resolution = 0.5) %>% 
+  RunTSNE(dims = 1:50)
+
+s.all@meta.data %<>% 
+  mutate( time = toupper( time)) %>% 
+  mutate( time_method = paste(time, method, sep = "_"))
+
+
+saveRDS( s.all, file = paste0("data/prepare_data_co-clustering_", Sys.Date(),".rds"),compress = FALSE)
+
+# use f.cluster.seuratv3.2 to cluster the single cell, the object was splited by time_method
+```
+
+# raw clustering result
+```{r}
+
+s.all <- readRDS("~/Documents/GitHub/10X_Clk856_TH/data/coclustering_celseq2_10x_seed_123_2021-11-01.rds")
+
+```
+
+
+# filter clusters
+
+# plot nFeature_RNA nCount_RNA and percent of mt
+
+```{r}
+
+l.plot <- c("nFeature_RNA", "nCount_RNA","percent.mt")
+
+s.all@meta.data %>% names()
+
+l.plot <- lapply(l.plot, function(x) {
+  s.all@meta.data %>% 
+    select( seurat_clusters, x ) %>% 
+    mutate( seurat_clusters = factor( seurat_clusters, levels = mixedsort(unique(as.character(seurat_clusters))))) %>% 
+  ggplot(aes(seurat_clusters, get(x), fill = seurat_clusters))+
+  geom_violin() +
+  geom_boxplot(width = 0.1,color="white") +
+  theme( legend.position = "none", axis.text.x = element_text(angle = 90))+
+  labs(x="", y=x)
+})
+
+pdf(paste0("figure/nFeature_nCount_percent_mt_in_all_clusters_before_filter_", Sys.Date(),".pdf"),width = 15, height = 8)
+plot_grid(plotlist = l.plot, align = "hv", nrow = 3)
+dev.off()
+
+plot_grid(plotlist = l.plot, align = "hv", nrow = 3)
+
+# cluster 1, 8, 13, 61 detected fewer UMIs
+
+```
+
+# plot clock gene and ple vmat expression
+
+```{r}
+
+s.all.zt02.14 <- subset(s.all, cells = s.all$cell.names[s.all$time %in% c("ZT02","ZT14")])
+
+```
+
+
+#jitter plot function
+
+```{r}
+f.jitter.dotplot.2tps <- function(s.in, Gene, Cols = c( "#8F8F8F", "#00C5CD")){
+
+  df <- expm1(s.in@assays$RNA@data);
+
+  df.loc <- as.data.frame(df[Gene,]) %>% rownames_to_column() %>% set_colnames(c("rowname","GENE"))
+  df.loc$cluster <- Idents(s.in)[df.loc$rowname]
+  df.loc$time <- s.in@meta.data[df.loc$rowname,]$time
+
+
+  p <- ggplot(df.loc,aes(x=cluster,y=GENE,color=time)) + geom_jitter(alpha=0.5) + theme_cowplot() +
+    theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5),legend.position = "top",
+          legend.title = element_blank()) +
+    scale_y_continuous(breaks = round(seq(min(df.loc$GENE), max(df.loc$GENE), by = max(df.loc$GENE)/5 ))) +
+    labs(title = Gene, x="",y="TP1OK")
+
+  return( p )
+}
+
+l.genes <- c("Clk","tim","ple","DAT")
+
+
+l.plots <- lapply(l.genes, f.jitter.dotplot.2tps, s.in = s.all.zt02.14)
+
+pdf(paste0("figure/marker_genes_expression_in_all_clusters_before_filter",Sys.Date(),".pdf"),width = 15, height = 10)
+plot_grid(plotlist = l.plots, align = "hv", nrow = 4)
+dev.off()
+
+plot_grid(plotlist = l.plots, align = "hv", nrow = 4)
+
+# rm(l.plot, l.plots)
+
+```
+
+
+#subset confident clusters
+
+## based on clk tim ple and vmat expression
+## based on 6 time points of celseq2 data, each cluster should have cells from 6 time points
+## each cluster should have cells from 10x and celseq2 dataset
+## exclude clusters show very low nFeature_RNA and nCount_RNA
+
+
+```{r}
+
+l.clk.clusters <- c(2,3,4,9,10,12,17,22,26,30,31,33,37,38,44,50)
+
+length( l.clk.clusters )
+
+
+f.jitter.dotplot <- function(s.in, Gene){
+
+  df <- expm1(s.in@assays$RNA@data);
+
+  df.loc <- as.data.frame(df[Gene,]) %>% rownames_to_column() %>% set_colnames(c("rowname","GENE"))
+  df.loc$cluster <- Idents(s.in)[df.loc$rowname]
+
+  p <- ggplot(df.loc,aes(x=cluster,y=GENE)) + 
+    geom_jitter(alpha=0.5) + 
+    theme_cowplot() +
+    theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5),legend.position = "top",
+          legend.title = element_blank()) +
+    scale_y_continuous(breaks = round(seq(min(df.loc$GENE), max(df.loc$GENE), by = max(df.loc$GENE)/5 ))) +
+    labs(title = Gene, x="",y="TOP1OK")
+
+  return( p )
+}
+
+p1 <- f.jitter.dotplot(s.in = s.all,Gene = "Vmat")
+p2 <-f.jitter.dotplot(s.in = s.all,Gene = "ple")
+
+p2 / p1
+
+
+l.th.clusters <- c(1,7,11,14,21,24,25,28,29,32,39,40,41,43,45,46,49,51,56,57,61,63,64) 
+
+
+l.cluster <- c(l.clk.clusters, l.th.clusters) %>% 
+  unique()
+
+
+length( l.cluster )
+
+# check 6 time points on all the clusters.
+
+l.clusters.less.6.pts <- s.all@meta.data %>% 
+  select( seurat_clusters, time, method) %>% 
+  filter( method == "Celseq2") %>% 
+  select(seurat_clusters, time) %>% 
+  group_by(seurat_clusters) %>% 
+  summarise(ntime = n_distinct(time)) %>%
+  filter( ntime < 6) %>% 
+  pull(seurat_clusters) %>% 
+  as.character() %>% 
+  as.numeric()
+
+
+
+# plot the distribution of cells, the sources they come from
+
+table(s.all@meta.data$seurat_clusters, s.all@meta.data$Source) %>% 
+  as.data.frame() %>% 
+  set_colnames(c("cluster","Source","nCells")) %>% 
+  filter( cluster %in% l.cluster ) %>% 
+  ggplot(aes(x=cluster, y= nCells, fill= Source))+
+  geom_col(position = "fill")
+
+
+l.cluster <- l.cluster[l.cluster %ni% unique(c(l.clusters.less.6.pts,1, 8, 13, 61))]
+
+length( l.cluster )
+
+
+# there are 34 clusters remained.
+
+s.all.subset <- subset(s.all,cells = s.all@meta.data$cell.names[s.all@meta.data$seurat_clusters %in% l.cluster])
+
+s.all.subset@meta.data$seurat_clusters_1st_cluster <- s.all.subset@meta.data$seurat_clusters
+
+f.feature.tsne(Gene = "ple", s.all.subset)
+
+saveRDS(s.all.subset, file = paste0("data/subset_confident_clock_th_clusters_",Sys.Date(),".rds"),compress = FALSE)
+
+
+# iterate the clustering by f.cluster.seuratv3.2
+
+```
+
+
+```{r}
+
+s.all.subset <- readRDS("~/Documents/GitHub/10X_Clk856_TH/data/Iterate_subset_confident_clusters_seed_123_2021-11-01.rds")
+
+```
+
+
+# number of cells from different resouce
+```{r}
+
+s.all.subset@meta.data$seurat_clusters_2nd <- s.all.subset@active.ident
+
+s.all.subset@meta.data$seurat_clusters <- s.all.subset@active.ident
+
+
+p1 <- table(s.all.subset@meta.data$seurat_clusters, s.all.subset@meta.data$Source) %>% 
+  as.data.frame() %>%
+  set_colnames(c("cluster","Source","nCells")) %>% 
+  ggplot(aes(x=cluster, y= nCells, fill= Source))+
+  geom_col()+
+  labs(x="Cluster",y="Number of cells")
+
+p2 <- table(s.all.subset@meta.data$seurat_clusters, s.all.subset@meta.data$Source) %>% 
+  as.data.frame() %>%
+  set_colnames(c("cluster","Source","nCells")) %>% 
+  ggplot(aes(x=cluster, y= nCells, fill= Source))+
+  geom_col(position = "fill")+
+  scale_y_continuous(labels = scales::percent_format())+
+  labs(x="Cluster",y="Number of cells")
+
+pdf(paste0("figure/Number_of_cells_source_before_filter_",Sys.Date(),".pdf"),width = 16)
+p1
+dev.off()
+
+
+```
+
+
+# remove cells from the merged clusters, for instance, Clk neurons in TH clusters, and TH neurons in clock clusters.
+
+```{r}
+
+l.opque.th.clusters <- c(9,13,19,20,21,27,28,31,33,37)
+
+l.bad.clk.cells <- s.all.subset@meta.data %>% 
+  filter(seurat_clusters %in% l.opque.th.clusters) %>% 
+  pull(cell.names) %>% 
+  grep("Clk856",x = ., ignore.case = TRUE,value = TRUE)
+
+
+
+
+pdf(paste0("figure/Dimplot_clock_cells_clustered_with_TH_neurons_in_subset_clustering_",Sys.Date(),".pdf"),width = 8)
+
+DimPlot(object = s.all.subset, cells.highlight = l.bad.clk.cells, cols.highlight = "red", cols = "gray", order = TRUE) +
+  theme_minimal()+
+  theme(legend.position = "none") +
+  labs(caption = "Some Clk856 cell co-clustered with TH neuron clusters")
+
+dev.off()
+
+
+l.opque.clock.clusters <- c( 2,11,18 )
+
+l.bad.th.cells <- s.all.subset@meta.data %>% 
+  filter(seurat_clusters %in% l.opque.clock.clusters) %>% 
+  pull(cell.names) %>% 
+  grep("th",x = ., ignore.case = TRUE,value = TRUE)
+
+toRemove <- c(l.bad.clk.cells,l.bad.th.cells)
+
+s.all.subset <- s.all.subset[,!colnames(s.all.subset) %in% toRemove]
+
+
+s.all.subset@meta.data %>% 
+  select( seurat_clusters, time, method) %>% 
+  filter( method == "Celseq2") %>% 
+  select(seurat_clusters, time) %>% 
+  group_by(seurat_clusters) %>% 
+  summarise(ntime = n_distinct(time)) %>%
+  filter( ntime < 6) %>% 
+  pull(seurat_clusters) %>% 
+  as.character() %>% 
+  as.numeric()
+
+# cluster 40 don't have 6 time points data from celseq2.
+
+pdf(paste0("figure/Number_of_cells_source_after_removed_bad_cells_",Sys.Date(),".pdf"),width = 8)
+
+table(s.all.subset@meta.data$seurat_clusters, s.all.subset@meta.data$Source) %>% 
+  as.data.frame() %>%
+  set_colnames(c("cluster","Source","nCells")) %>% 
+  ggplot(aes(x=cluster, y= nCells, fill= Source))+
+  geom_col()+
+  labs(x="Cluster",y="Number of cells")
+
+dev.off()
+
+
+# remove 4 clusters don't have 6 time points data
+
+s.all.subset <- subset(s.all.subset, cells = s.all.subset@meta.data$cell.names[s.all.subset@active.ident %ni% c(40)])
+
+
+saveRDS(s.all.subset, file = paste0("data/subset_confident_clock_th_clusters_removed_bad_cells_",Sys.Date(),".rds"))
+
+```
+
+
+# plot tsne and feature plots, after remove opque cells
+
+```{r}
+
+pdf(paste0("figure/tsne_plot_",Sys.Date(),".pdf"),width = 8)
+DimPlot(s.all.subset,label = TRUE, pt.size = 0.5) + 
+  theme_minimal()+
+  NoLegend()
+dev.off()
+
+pdf(paste0("figure/tsne_plot_group_by_method_",Sys.Date(),".pdf"),width = 8)
+DimPlot( s.all.subset,group.by = "method")+theme_minimal()
+dev.off()
+
+
+pdf(paste0("figure/tsne_plot_group_by_source_",Sys.Date(),".pdf"),width = 8)
+DimPlot( s.all.subset,group.by = "Source")+theme_minimal()
+dev.off()
+
+
+pdf(paste0("figure/tsne_plot_group_by_time_",Sys.Date(),".pdf"),width = 8)
+DimPlot( s.all.subset,group.by = "time")+theme_minimal()
+dev.off()
+
+
+pdf(paste0("figure/feature_plot_Pdf_",Sys.Date(),".pdf"),width = 8)
+f.feature.tsne(Gene = "Pdf",s.in = s.all.subset)+theme_minimal()
+dev.off()
+
+pdf(paste0("figure/feature_plot_Trissin_",Sys.Date(),".pdf"),width = 8)
+f.feature.tsne(Gene = "Trissin",s.in = s.all.subset)+theme_minimal()
+dev.off()
+
+pdf(paste0("figure/feature_plot_gl_",Sys.Date(),".pdf"),width = 8)
+f.feature.tsne(Gene = "gl",s.in = s.all.subset)+theme_minimal()
+dev.off()
+
+```
+
+
+# rename clusters
+
+```{r}
+
+Idents(s.all.subset) <- s.all.subset$seurat_clusters
+
+l.clk.clusters <- c(0,1,2,3,5,6,7,10,11,12,14,15,16,18,25,29,32,34,38)
+l.th.clusters <- c(4,8,9,13,17,19,20,21,22,23,24,26,27,28,30,31,33,35,36,37,39,41,42,43)
+
+
+s.all.subset <- Seurat::RenameIdents(object = s.all.subset,
+                             "0" = "0:DN1p_CNMa(1)",
+                             "1" = "1:LNv(2,25)", 
+                             "3" = "3:DN1a(3)", 
+                             "5" = "5:DN1p(6)",
+                             "6" = "6:LNd_NPF(9)",
+                             "7" = "7:DN3(14)",
+                             "10" = "10:LNd_Trissin(5)",
+                             "11" = "11:DN1p(7)",
+                             "12" = "12:LPN(29)",
+                             "14" = "14:DN3(20)",
+                             "15" = "15:LNd(12)",
+                             "16" = "16:DN1p(4)",
+                             "18" = "18:LN_ITP(8)",
+                             "29" = "29:DN2(19)",
+                             "32" = "32:DN1p_CNMa(15)",
+                             "34" = "34:DN3(14)",
+                             "38" = "38:DN1p(18)",
+                             "25" = "25:Clk",
+                             "2" = "2:Clk"
+                             )
+
+
+pdf(paste0("figure/tsne_renamed_Idents_expression_",Sys.Date(),".pdf"),width = 8)
+
+DimPlot(s.all.subset, label = T)+
+  theme_minimal()+
+  NoLegend()
+
+dev.off()
+
+
+s.all.subset@meta.data$renamed_idents <- s.all.subset@active.ident
+
+s.all.subset@active.ident <- s.all.subset$seurat_clusters
+
+s.all.subset <- ScaleData(s.all.subset,features = rownames(s.all.subset@assays$RNA@data),assay = "RNA")
+
+```
+
+
+```{r}
+                
+saveRDS(s.all.subset, file = paste0("data/subset_confident_clock_th_clusters_removed_bad_cells_renamed_clusters_",Sys.Date(),".rds"))
+               
+```
+
+
+# number of TH neurons and clock neurons
+```{r}
+
+pdf(save_pdf("tim_expression_in_final_clusters"),width = 10)
+f.jitter.dotplot(Gene = "tim",s.in = s.all.subset)
+dev.off()
+
+pdf(save_pdf("ple_expression_in_final_clusters"),width = 10)
+f.jitter.dotplot(Gene = "ple",s.in = s.all.subset)
+dev.off()
+
+l.all.cluster <- s.all.subset$seurat_clusters %>% 
+  as.character() %>% 
+  unique()
+
+l.clk.clusters <- c(0,1,2,3,5,6,7,10,11,12,14,15,16,18,25,29,32,34,38)
+
+l.th.clusters <- l.all.cluster[l.all.cluster %ni% l.clk.clusters]
+
+
+s.all.subset@meta.data$classification <- ifelse(s.all.subset@meta.data$seurat_clusters %in% l.clk.clusters, "Clock neurons","TH neurons")
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
