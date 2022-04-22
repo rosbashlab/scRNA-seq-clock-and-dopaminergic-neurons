@@ -51,15 +51,10 @@ ls()
 
 s.all.subset <- readRDS("~/Documents/GitHub/10X_Clk856_TH/data/subset_confident_clock_th_clusters_removed_bad_cells_renamed_clusters_2021-11-01.rds")
 
-s.all.subset$renamed_idents <- as.character(s.all.subset$renamed_idents )
-s.all.subset$renamed_idents[s.all.subset$renamed_idents == "2"] = "2:Clk"
-s.all.subset$renamed_idents[s.all.subset$renamed_idents == 25] <- "25:DN1p(4)"
-
 DimPlot(s.all.subset, label = T) + 
   theme_minimal() +
   NoLegend()
 
-dim( s.all.subset )
 
 ```
 
@@ -115,15 +110,8 @@ s.all@meta.data$cell.name <- rownames( s.all@meta.data )
 # remove doublets from 10x data
 
 ```{r}
-read.csv("scrublet_output_table_ZT02.csv") %>% 
-  mutate(color = ifelse(doublet_score > 0.15, "yes","no")) %>% 
-  # count(color) %>% 
-  ggplot( aes(doublet_score, fill = color)) +
-  geom_histogram()+
-  scale_x_log10()
 
 df.barcodes <- read.csv("data_old/10x_filtered_raw_data/ZT02/barcodes.tsv",header = FALSE)
-
 
 l.db.02 <- read.csv("scrublet_output_table_ZT02.csv") %>% 
   mutate(barcodes = df.barcodes$V1) %>% 
@@ -192,8 +180,6 @@ s.clk@meta.data %<>%
          "Repeat" = "Repeats") %>% 
   mutate( method = "Celseq2",
           Source = "Clk856")
-
-
 
 # prepare TH data ---
 # all  raw single cell data from Celseq2 were put together in a seurat object, s.dat.in.th.new.ex.rds.
@@ -327,13 +313,16 @@ f.jitter.dotplot.2tps <- function(s.in, Gene, Cols = c( "#8F8F8F", "#00C5CD")){
 
   df <- expm1(s.in@assays$RNA@data);
 
-  df.loc <- as.data.frame(df[Gene,]) %>% rownames_to_column() %>% set_colnames(c("rowname","GENE"))
+  df.loc <- as.data.frame(df[Gene,]) %>% 
+  rownames_to_column() %>% 
+  set_colnames(c("rowname","GENE"))
+  
   df.loc$cluster <- Idents(s.in)[df.loc$rowname]
   df.loc$time <- s.in@meta.data[df.loc$rowname,]$time
 
-
   p <- ggplot(df.loc,aes(x=cluster,y=GENE,color=time)) + geom_jitter(alpha=0.5) + theme_cowplot() +
-    theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5),legend.position = "top",
+    theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5),
+          legend.position = "top",
           legend.title = element_blank()) +
     scale_y_continuous(breaks = round(seq(min(df.loc$GENE), max(df.loc$GENE), by = max(df.loc$GENE)/5 ))) +
     labs(title = Gene, x="",y="TP1OK")
@@ -361,7 +350,7 @@ plot_grid(plotlist = l.plots, align = "hv", nrow = 4)
 
 ## based on clk tim ple and vmat expression
 ## based on 6 time points of celseq2 data, each cluster should have cells from 6 time points
-## each cluster should have cells from 10x and celseq2 dataset
+## each cluster should have cells from 10x and celseq2 datasets
 ## exclude clusters show very low nFeature_RNA and nCount_RNA
 
 
@@ -371,18 +360,21 @@ l.clk.clusters <- c(2,3,4,9,10,12,17,22,26,30,31,33,37,38,44,50)
 
 length( l.clk.clusters )
 
-
 f.jitter.dotplot <- function(s.in, Gene){
 
   df <- expm1(s.in@assays$RNA@data);
 
-  df.loc <- as.data.frame(df[Gene,]) %>% rownames_to_column() %>% set_colnames(c("rowname","GENE"))
+  df.loc <- as.data.frame(df[Gene,]) %>% 
+  rownames_to_column() %>% 
+  set_colnames(c("rowname","GENE"))
+  
   df.loc$cluster <- Idents(s.in)[df.loc$rowname]
 
   p <- ggplot(df.loc,aes(x=cluster,y=GENE)) + 
     geom_jitter(alpha=0.5) + 
     theme_cowplot() +
-    theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5),legend.position = "top",
+    theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5),
+          legend.position = "top",
           legend.title = element_blank()) +
     scale_y_continuous(breaks = round(seq(min(df.loc$GENE), max(df.loc$GENE), by = max(df.loc$GENE)/5 ))) +
     labs(title = Gene, x="",y="TOP1OK")
@@ -417,8 +409,6 @@ l.clusters.less.6.pts <- s.all@meta.data %>%
   pull(seurat_clusters) %>% 
   as.character() %>% 
   as.numeric()
-
-
 
 # plot the distribution of cells, the sources they come from
 
@@ -489,7 +479,7 @@ dev.off()
 ```
 
 
-# remove cells from the merged clusters, for instance, Clk neurons in TH clusters, and TH neurons in clock clusters.
+# remove less confidence cells from the merged clusters.
 
 ```{r}
 
@@ -500,9 +490,6 @@ l.bad.clk.cells <- s.all.subset@meta.data %>%
   pull(cell.names) %>% 
   grep("Clk856",x = ., ignore.case = TRUE,value = TRUE)
 
-
-
-
 pdf(paste0("figure/Dimplot_clock_cells_clustered_with_TH_neurons_in_subset_clustering_",Sys.Date(),".pdf"),width = 8)
 
 DimPlot(object = s.all.subset, cells.highlight = l.bad.clk.cells, cols.highlight = "red", cols = "gray", order = TRUE) +
@@ -511,7 +498,6 @@ DimPlot(object = s.all.subset, cells.highlight = l.bad.clk.cells, cols.highlight
   labs(caption = "Some Clk856 cell co-clustered with TH neuron clusters")
 
 dev.off()
-
 
 l.opque.clock.clusters <- c( 2,11,18 )
 
@@ -609,7 +595,6 @@ Idents(s.all.subset) <- s.all.subset$seurat_clusters
 l.clk.clusters <- c(0,1,2,3,5,6,7,10,11,12,14,15,16,18,25,29,32,34,38)
 l.th.clusters <- c(4,8,9,13,17,19,20,21,22,23,24,26,27,28,30,31,33,35,36,37,39,41,42,43)
 
-
 s.all.subset <- Seurat::RenameIdents(object = s.all.subset,
                              "0" = "0:DN1p_CNMa(1)",
                              "1" = "1:LNv(2,25)", 
@@ -682,24 +667,3 @@ s.all.subset@meta.data$classification <- ifelse(s.all.subset@meta.data$seurat_cl
 
 
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
