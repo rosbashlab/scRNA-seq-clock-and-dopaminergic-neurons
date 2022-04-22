@@ -195,10 +195,8 @@ f.feature.tsne.v2 <- function(Gene, s.in, threshold = 1) {
   }
   
   
-  if( DefaultAssay(s.in) != "RNA" ){
-    
-    DefaultAssay(s.in) <- "RNA"
-    
+  if( DefaultAssay(s.in) != "RNA" ){    
+    DefaultAssay(s.in) <- "RNA"    
   }
   
   l.genes <- Gene;
@@ -247,10 +245,7 @@ f.feature.tsne.v2 <- function(Gene, s.in, threshold = 1) {
       scale_color_gradientn( colors=c("grey75", "purple", "purple1", "purple2", "purple3", "purple4","Black"), name = l.genes[2])+
       new_scale_color()+
       geom_point( data=df[ df$three > threshold, ], aes(color= three), size=1.0, alpha=0.5, shape=16 ) + 
-      scale_color_gradientn( colors=c("grey75", "orange", "orange1", "orange2", "orange3", "orange4","Black"), name = l.genes[3])+ theme_cowplot()
-    
-    
-    
+      scale_color_gradientn( colors=c("grey75", "orange", "orange1", "orange2", "orange3", "orange4","Black"), name = l.genes[3])+ theme_cowplot()   
   }
   
   cat("Mission complete \n")
@@ -267,7 +262,6 @@ f.dotplot.custom <- function( p ) {
   
   df<- p$data
   
-  ### the matrix for the scaled expression 
   exp_mat<-df %>% 
     select(-pct.exp, -avg.exp) %>%  
     pivot_wider(names_from = id, values_from = avg.exp.scaled) %>% 
@@ -275,8 +269,6 @@ f.dotplot.custom <- function( p ) {
   
   row.names(exp_mat) <- exp_mat$features.plot  
   exp_mat <- exp_mat[,-1] %>% as.matrix()
-  
-  ## the matrix for the percentage of cells express a gene
   
   percent_mat<-df %>% 
     select(-avg.exp, -avg.exp.scaled) %>%  
@@ -286,12 +278,10 @@ f.dotplot.custom <- function( p ) {
   row.names(percent_mat) <- percent_mat$features.plot  
   percent_mat <- percent_mat[,-1] %>% as.matrix()
   
-  library(viridis)
-  library(Polychrome)
+  require(viridis)
+  require(Polychrome)
 
-  
   col_fun = circlize::colorRamp2(c(-1, 0, 2), viridis(20)[c(1,10, 20)])
-  
   
   cell_fun = function(j, i, x, y, w, h, fill){
     grid.rect(x = x, y = y, width = w, height = h, 
@@ -299,8 +289,6 @@ f.dotplot.custom <- function( p ) {
     grid.circle(x=x,y=y,r= percent_mat[i, j]/100 * min(unit.c(w, h)),
                 gp = gpar(fill = col_fun(exp_mat[i, j]), col = NA))}
   
-  
-  ## also do a kmeans clustering for the genes with k = 4
   
   p1 <- Heatmap(exp_mat,
                 heatmap_legend_param=list(title="expression"),
@@ -316,12 +304,3 @@ f.dotplot.custom <- function( p ) {
   return( p1 )
   
 }
-
-
-
-
-
-
-  
-  
-  
