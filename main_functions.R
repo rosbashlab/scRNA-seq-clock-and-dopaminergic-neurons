@@ -5,7 +5,7 @@ save_pdf <- function(x){
 }
 
 
-# calculate entropy in  each cell
+# calculate entropy in each cell
 
 f.entropy <- function( m.in ){
   m.in <- apply( m.in, 2, function( x ){ x / sum(x, na.rm=T ); } );
@@ -14,7 +14,7 @@ f.entropy <- function( m.in ){
 }
 
 
-# clustering
+# integration and clustering
 
 f.cluster.seuratv3.2 <- function( s.in, nDims = 50, k.anchor.use = 5, k.filter.use = 199, k.score.use = 30, k.weight.use = 100, split.by.var = "time" ){
   
@@ -124,12 +124,9 @@ f.plot.marker.heatmap <- function(s.in = s.clk.sub,df.marker = df.m.clk,features
   
   v.features <- unique( unlist( as.vector( tmp ) ) ) %>% as.character();
   
-  
-  
   s.in <- ScaleData(s.in, features = rownames(s.in@assays$RNA@data),assay = "RNA")
   
   v.features <- v.features[v.features %in% rownames(s.clk.sub@assays$RNA@scale.data)]
-  
   
   s.in$seurat_clusters <- factor(s.in$seurat_clusters, levels = mixedsort(unique(as.character(s.in$seurat_clusters))))
   
